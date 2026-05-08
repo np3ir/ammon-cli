@@ -119,6 +119,51 @@ def get_artist_all_albums(api: AppleMusicApi, artist_id: str,
     return all_albums
 
 
+def get_playlist_info(api: AppleMusicApi, playlist_id: str) -> dict | None:
+    """Fetch playlist name and basic info."""
+    try:
+        resp = api.session.get(
+            f"https://amp-api.music.apple.com/v1/catalog/{api.storefront.lower()}/playlists/{playlist_id}",
+            params={"l": "en-US"}
+        )
+        if resp.status_code == 200:
+            data = resp.json()["data"][0]
+            attrs = data.get("attributes", {})
+            return {"apple_id": playlist_id, "name": attrs.get("name", playlist_id)}
+    except Exception:
+        pass
+    return None
+
+
+def get_playlist_tracks(api: AppleMusicApi, playlist_id: str) -> list[dict]:
+    """Fetch all tracks in a playlist. Returns list of track dicts."""
+    tracks = []
+    url = f"https://amp-api.music.apple.com/v1/catalog/{api.storefront.lower()}/playlists/{playlist_id}/tracks"
+    params = {"limit": 100, "l": "en-US"}
+    try:
+        while url:
+            resp = api.session.get(url, params=params, timeout=15)
+            if resp.status_code != 200:
+                break
+            data = resp.json()
+            for track in data.get("data", []):
+                attrs = track.get("attributes", {})
+                rels = track.get("relationships", {})
+                artist_rels = rels.get("artists", {}).get("data", [])
+                tracks.append({
+                    "track_id":    track["id"],
+                    "track_name":  attrs.get("name", ""),
+                    "artist_name": attrs.get("artistName", ""),
+                    "artist_ids":  [a["id"] for a in artist_rels if "id" in a],
+                })
+            next_path = data.get("next")
+            url = f"https://amp-api.music.apple.com{next_path}" if next_path else None
+            params = {}
+    except Exception:
+        pass
+    return tracks
+
+
 def get_release_type(album_data: dict) -> str:
     if album_data.get("is_compilation"):
         return "COMPILATION"

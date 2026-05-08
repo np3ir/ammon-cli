@@ -40,6 +40,28 @@ def _init(conn: sqlite3.Connection):
 
         CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(artist_apple_id);
         CREATE INDEX IF NOT EXISTS idx_albums_downloaded ON albums(downloaded);
+
+        CREATE TABLE IF NOT EXISTS playlists (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            apple_id   TEXT    UNIQUE NOT NULL,
+            name       TEXT,
+            added_at   INTEGER DEFAULT (strftime('%s','now')),
+            last_check INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS playlist_tracks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            playlist_id TEXT NOT NULL,
+            track_id    TEXT NOT NULL,
+            track_name  TEXT,
+            artist_name TEXT,
+            downloaded  INTEGER DEFAULT 0,
+            discovered_at INTEGER DEFAULT (strftime('%s','now')),
+            UNIQUE(playlist_id, track_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playlist_id);
+        CREATE INDEX IF NOT EXISTS idx_playlist_tracks_dl ON playlist_tracks(downloaded);
     """)
     conn.commit()
 
@@ -110,6 +132,73 @@ def mark_downloaded(conn, apple_id: str, path: str = ""):
 def get_pending_downloads(conn) -> list:
     return [dict(r) for r in conn.execute(
         "SELECT * FROM albums WHERE downloaded=0 ORDER BY release_date DESC"
+    ).fetchall()]
+
+
+# ── Playlists ─────────────────────────────────────────────────────────────────
+
+def add_playlist(conn, apple_id: str, name: str) -> int:
+    now = int(time.time())
+    conn.execute(
+        "INSERT OR IGNORE INTO playlists (apple_id, name, added_at) VALUES (?,?,?)",
+        (apple_id, name, now)
+    )
+    conn.execute("UPDATE playlists SET name=? WHERE apple_id=?", (name, apple_id))
+    conn.commit()
+    return conn.execute("SELECT id FROM playlists WHERE apple_id=?", (apple_id,)).fetchone()["id"]
+
+
+def remove_playlist(conn, apple_id: str) -> bool:
+    cur = conn.execute("DELETE FROM playlists WHERE apple_id=?", (apple_id,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def get_all_playlists(conn) -> list:
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM playlists ORDER BY name COLLATE NOCASE"
+    ).fetchall()]
+
+
+def get_playlist(conn, apple_id: str) -> dict | None:
+    row = conn.execute("SELECT * FROM playlists WHERE apple_id=?", (apple_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def update_playlist_last_check(conn, apple_id: str):
+    conn.execute("UPDATE playlists SET last_check=? WHERE apple_id=?",
+                 (int(time.time()), apple_id))
+    conn.commit()
+
+
+def add_playlist_track(conn, playlist_id: str, track_id: str,
+                       track_name: str, artist_name: str) -> bool:
+    """Returns True if newly inserted."""
+    cur = conn.execute("""
+        INSERT OR IGNORE INTO playlist_tracks
+            (playlist_id, track_id, track_name, artist_name)
+        VALUES (?,?,?,?)
+    """, (playlist_id, track_id, track_name, artist_name))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def mark_track_downloaded(conn, playlist_id: str, track_id: str):
+    conn.execute(
+        "UPDATE playlist_tracks SET downloaded=1 WHERE playlist_id=? AND track_id=?",
+        (playlist_id, track_id)
+    )
+    conn.commit()
+
+
+def get_pending_playlist_tracks(conn, playlist_id: str = None) -> list:
+    if playlist_id:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM playlist_tracks WHERE downloaded=0 AND playlist_id=?",
+            (playlist_id,)
+        ).fetchall()]
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM playlist_tracks WHERE downloaded=0"
     ).fetchall()]
 
 

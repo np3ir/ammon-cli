@@ -6,6 +6,25 @@ from pathlib import Path
 ORPHEUS_DIR = Path("C:/OrpheusDL")
 
 
+def download_track(apple_id: str, storefront: str = "us") -> tuple[bool, str]:
+    """Download a single track via orpheus CLI."""
+    url = f"https://music.apple.com/{storefront}/song/{apple_id}"
+    try:
+        result = subprocess.run(
+            [sys.executable, str(ORPHEUS_DIR / "orpheus.py"), url],
+            cwd=str(ORPHEUS_DIR),
+            capture_output=False,
+            timeout=600,
+        )
+        if result.returncode == 0:
+            return True, f"Downloaded {apple_id}"
+        return False, f"orpheus exited with code {result.returncode}"
+    except subprocess.TimeoutExpired:
+        return False, "Timeout"
+    except Exception as e:
+        return False, str(e)
+
+
 def download_album(apple_id: str, storefront: str = "us") -> tuple[bool, str]:
     """
     Download an album via orpheus CLI.

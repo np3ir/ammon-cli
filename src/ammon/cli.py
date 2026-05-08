@@ -193,6 +193,154 @@ def import_odesli(ctx, db_path):
     click.echo(f"  Imported {added} new artists from odesli ({len(rows)} total with Apple ID).")
 
 
+@cli.group()
+def playlist():
+    """Monitor Apple Music playlists for new tracks."""
+    pass
+
+
+@playlist.command(name="follow")
+@click.argument("playlist_id")
+@click.pass_context
+def playlist_follow(ctx, playlist_id):
+    """Follow a playlist by ID (e.g. pl.xxx or catalog album ID)."""
+    conn = _get_conn(ctx.obj["db"])
+    apple_api = _get_api(ctx.obj["cookies"])
+    info = _api.get_playlist_info(apple_api, playlist_id)
+    if not info:
+        click.echo(f"  [!] Playlist {playlist_id} not found.")
+        conn.close()
+        sys.exit(1)
+    _db.add_playlist(conn, playlist_id, info["name"])
+    # Seed existing tracks so we only alert on FUTURE additions
+    tracks = _api.get_playlist_tracks(apple_api, playlist_id)
+    for t in tracks:
+        _db.add_playlist_track(conn, playlist_id, t["track_id"], t["track_name"], t["artist_name"])
+    _db.update_playlist_last_check(conn, playlist_id)
+    click.echo(f"  + Following playlist: {info['name']} ({playlist_id})")
+    click.echo(f"    Seeded {len(tracks)} existing tracks — only new additions will be flagged.")
+    conn.close()
+
+
+@playlist.command(name="unfollow")
+@click.argument("playlist_id")
+@click.pass_context
+def playlist_unfollow(ctx, playlist_id):
+    """Stop following a playlist."""
+    conn = _get_conn(ctx.obj["db"])
+    pl = _db.get_playlist(conn, playlist_id)
+    if not pl:
+        click.echo(f"  [!] Playlist {playlist_id} not in follow list.")
+        conn.close()
+        sys.exit(1)
+    _db.remove_playlist(conn, playlist_id)
+    click.echo(f"  - Unfollowed: {pl['name']}")
+    conn.close()
+
+
+@playlist.command(name="list")
+@click.pass_context
+def playlist_list(ctx):
+    """List followed playlists."""
+    conn = _get_conn(ctx.obj["db"])
+    playlists = _db.get_all_playlists(conn)
+    conn.close()
+    if not playlists:
+        click.echo("  No playlists followed. Use: ammon playlist follow <id>")
+        return
+    click.echo(f"\n  {'Apple ID':<40} Name")
+    click.echo("  " + "-" * 70)
+    for p in playlists:
+        click.echo(f"  {p['apple_id']:<40} {p['name'] or '?'}")
+    click.echo()
+
+
+@playlist.command(name="refresh")
+@click.option("--download", "-d", is_flag=True, help="Download new tracks automatically")
+@click.option("--playlist", "-p", default=None, metavar="ID", help="Refresh only this playlist")
+@click.pass_context
+def playlist_refresh(ctx, download, playlist):
+    """Check followed playlists for new tracks."""
+    conn = _get_conn(ctx.obj["db"])
+    apple_api = _get_api(ctx.obj["cookies"])
+
+    playlists = [_db.get_playlist(conn, playlist)] if playlist else _db.get_all_playlists(conn)
+    if not playlists or playlists[0] is None:
+        click.echo("  No playlists followed.")
+        conn.close()
+        return
+
+    from . import downloader as _dl
+    total_new = total_dl = total_err = 0
+
+    for pl in playlists:
+        click.echo(f"  Checking: {pl['name']} ({pl['apple_id']})...")
+        tracks = _api.get_playlist_tracks(apple_api, pl["apple_id"])
+        new = dl = err = 0
+        for t in tracks:
+            is_new = _db.add_playlist_track(
+                conn, pl["apple_id"], t["track_id"], t["track_name"], t["artist_name"]
+            )
+            if is_new:
+                new += 1
+                click.echo(f"    + NEW: {t['artist_name']} - {t['track_name']} ({t['track_id']})")
+                if download:
+                    ok, msg = _dl.download_track(t["track_id"])
+                    if ok:
+                        _db.mark_track_downloaded(conn, pl["apple_id"], t["track_id"])
+                        dl += 1
+                        click.echo(f"      + Downloaded")
+                    else:
+                        err += 1
+                        click.echo(f"      x {msg}")
+        _db.update_playlist_last_check(conn, pl["apple_id"])
+        click.echo(f"    {new} new, {dl} downloaded, {err} errors")
+        total_new += new; total_dl += dl; total_err += err
+
+    click.echo(f"\n  Done — {total_new} new tracks, {total_dl} downloaded, {total_err} errors.")
+    conn.close()
+
+
+@playlist.command(name="extract-artists")
+@click.argument("playlist_id")
+@click.option("--follow", "-f", is_flag=True, help="Add extracted artists to ammon follow list")
+@click.pass_context
+def playlist_extract_artists(ctx, playlist_id, follow):
+    """Extract all artists from a playlist and optionally follow them."""
+    conn = _get_conn(ctx.obj["db"])
+    apple_api = _get_api(ctx.obj["cookies"])
+
+    tracks = _api.get_playlist_tracks(apple_api, playlist_id)
+    if not tracks:
+        click.echo("  No tracks found or playlist unavailable.")
+        conn.close()
+        sys.exit(1)
+
+    # Collect unique artist IDs
+    artist_ids = {}
+    for t in tracks:
+        for aid in t.get("artist_ids", []):
+            if aid not in artist_ids:
+                artist_ids[aid] = t["artist_name"]
+
+    click.echo(f"\n  Found {len(artist_ids)} unique artists in playlist\n")
+
+    added = 0
+    for apple_id, name in artist_ids.items():
+        click.echo(f"  {apple_id:<15} {name}")
+        if follow:
+            if not _db.get_artist(conn, apple_id):
+                _db.add_artist(conn, apple_id, name)
+                added += 1
+
+    if follow:
+        click.echo(f"\n  + Added {added} new artists to follow list.")
+    else:
+        click.echo(f"\n  Run with --follow to add these artists to ammon.")
+
+    conn.close()
+
+
 @cli.command(name="download-pending")
 @click.pass_context
 def download_pending(ctx):
