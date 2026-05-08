@@ -165,19 +165,27 @@ def get_playlist_tracks(api: AppleMusicApi, playlist_id: str) -> list[dict]:
                 # Library playlist tracks: artist IDs live inside catalog relationship
                 catalog_items = rels.get("catalog", {}).get("data", [])
                 if catalog_items:
-                    catalog_rels   = catalog_items[0].get("relationships", {})
-                    artist_rels    = catalog_rels.get("artists", {}).get("data", [])
-                    catalog_id     = catalog_items[0].get("id", track["id"])
+                    catalog_rels = catalog_items[0].get("relationships", {})
+                    artist_rels  = catalog_rels.get("artists", {}).get("data", [])
+                    catalog_id   = catalog_items[0].get("id", track["id"])
                 else:
-                    # Catalog playlist: artists are direct
                     artist_rels = rels.get("artists", {}).get("data", [])
                     catalog_id  = track["id"]
+
+                # Build {artist_id: artist_name} using individual names from attributes
+                artist_map = {}
+                for a in artist_rels:
+                    if "id" not in a:
+                        continue
+                    individual_name = a.get("attributes", {}).get("name", "")
+                    artist_map[a["id"]] = individual_name or attrs.get("artistName", "")
 
                 tracks.append({
                     "track_id":    catalog_id,
                     "track_name":  attrs.get("name", ""),
                     "artist_name": attrs.get("artistName", ""),
-                    "artist_ids":  [a["id"] for a in artist_rels if "id" in a],
+                    "artist_ids":  list(artist_map.keys()),
+                    "artist_names": artist_map,
                 })
             next_path = data.get("next")
             url = f"https://amp-api.music.apple.com{next_path}" if next_path else None

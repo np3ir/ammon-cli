@@ -330,12 +330,13 @@ def playlist_extract_artists(ctx, playlist_id, follow):
         conn.close()
         sys.exit(1)
 
-    # Collect unique artist IDs
+    # Collect unique artist IDs with individual names
     artist_ids = {}
     for t in tracks:
+        name_map = t.get("artist_names", {})
         for aid in t.get("artist_ids", []):
             if aid not in artist_ids:
-                artist_ids[aid] = t["artist_name"]
+                artist_ids[aid] = name_map.get(aid) or t["artist_name"]
 
     click.echo(f"\n  Found {len(artist_ids)} unique artists in playlist\n")
 
