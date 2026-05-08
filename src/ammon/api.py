@@ -149,7 +149,9 @@ def get_playlist_tracks(api: AppleMusicApi, playlist_id: str) -> list[dict]:
     """Fetch all tracks in a playlist. Returns list of track dicts."""
     tracks = []
     url = _playlist_base_url(api, playlist_id) + "/tracks"
-    params = {"limit": 100, "l": "en-US"}
+    is_lib = _is_library_playlist(playlist_id)
+    params = {"limit": 100, "l": "en-US",
+              "include": "artists,catalog" if is_lib else "artists"}
     try:
         while url:
             resp = api.session.get(url, params=params, timeout=15)
@@ -158,10 +160,21 @@ def get_playlist_tracks(api: AppleMusicApi, playlist_id: str) -> list[dict]:
             data = resp.json()
             for track in data.get("data", []):
                 attrs = track.get("attributes", {})
-                rels = track.get("relationships", {})
-                artist_rels = rels.get("artists", {}).get("data", [])
+                rels  = track.get("relationships", {})
+
+                # Library playlist tracks: artist IDs live inside catalog relationship
+                catalog_items = rels.get("catalog", {}).get("data", [])
+                if catalog_items:
+                    catalog_rels   = catalog_items[0].get("relationships", {})
+                    artist_rels    = catalog_rels.get("artists", {}).get("data", [])
+                    catalog_id     = catalog_items[0].get("id", track["id"])
+                else:
+                    # Catalog playlist: artists are direct
+                    artist_rels = rels.get("artists", {}).get("data", [])
+                    catalog_id  = track["id"]
+
                 tracks.append({
-                    "track_id":    track["id"],
+                    "track_id":    catalog_id,
                     "track_name":  attrs.get("name", ""),
                     "artist_name": attrs.get("artistName", ""),
                     "artist_ids":  [a["id"] for a in artist_rels if "id" in a],
