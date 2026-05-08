@@ -148,17 +148,23 @@ def get_playlist_info(api: AppleMusicApi, playlist_id: str) -> dict | None:
 def get_playlist_tracks(api: AppleMusicApi, playlist_id: str) -> list[dict]:
     """Fetch all tracks in a playlist. Returns list of track dicts."""
     tracks = []
-    url = _playlist_base_url(api, playlist_id) + "/tracks"
     is_lib = _is_library_playlist(playlist_id)
-    params = {"limit": 100, "l": "en-US",
-              "include": "artists,catalog" if is_lib else "artists"}
+    base_url = _playlist_base_url(api, playlist_id) + "/tracks"
+    base_params = {"limit": 100, "l": "en-US",
+                   "include": "artists,catalog" if is_lib else "artists"}
+    offset = 0
+    url = base_url
     try:
         while url:
-            resp = api.session.get(url, params=params, timeout=15)
+            params = {**base_params, "offset": offset} if offset > 0 else base_params
+            resp = api.session.get(base_url, params=params, timeout=15)
             if resp.status_code != 200:
                 break
             data = resp.json()
-            for track in data.get("data", []):
+            batch = data.get("data", [])
+            if not batch:
+                break
+            for track in batch:
                 attrs = track.get("attributes", {})
                 rels  = track.get("relationships", {})
 
@@ -187,9 +193,9 @@ def get_playlist_tracks(api: AppleMusicApi, playlist_id: str) -> list[dict]:
                     "artist_ids":  list(artist_map.keys()),
                     "artist_names": artist_map,
                 })
-            next_path = data.get("next")
-            url = f"https://amp-api.music.apple.com{next_path}" if next_path else None
-            params = {}
+            offset += len(batch)
+            total = data.get("meta", {}).get("total", 0)
+            url = base_url if offset < total else None
     except Exception:
         pass
     return tracks
