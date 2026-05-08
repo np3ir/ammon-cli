@@ -458,17 +458,6 @@ def export_artists(ctx, output, with_odesli):
                 odesli_data.setdefault(key, {})[r["platform"]] = r["platform_id"]
             oc.close()
 
-    # Deduplicate by name — multiple Apple IDs for same artist separated by |
-    seen = {}
-    for a in artists:
-        key = a["name"].lower().strip()
-        if key not in seen:
-            seen[key] = {"name": a["name"], "apple_ids": [a["apple_id"]]}
-        else:
-            if a["apple_id"] not in seen[key]["apple_ids"]:
-                seen[key]["apple_ids"].append(a["apple_id"])
-    deduped = list(seen.values())
-
     headers = ["Name", "Apple Music ID"]
     if with_odesli:
         headers += ["TIDAL ID", "Deezer ID", "Spotify ID"]
@@ -477,8 +466,8 @@ def export_artists(ctx, output, with_odesli):
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(headers)
-        for a in deduped:
-            row = [a["name"], "|".join(a["apple_ids"])]
+        for a in artists:
+            row = [a["name"], a["apple_id"]]
             if with_odesli:
                 extra = odesli_data.get(a["name"].lower().strip(), {})
                 row += [
@@ -488,7 +477,7 @@ def export_artists(ctx, output, with_odesli):
                 ]
             w.writerow(row)
 
-    click.echo(f"  Exported {len(deduped)} artists ({len(artists)} entries) to {output_path.resolve()}")
+    click.echo(f"  Exported {len(artists)} artists to {output_path.resolve()}")
 
 
 def main():
