@@ -429,6 +429,57 @@ def download_pending(ctx):
     click.echo(f"\n  Done — {ok} downloaded, {errors} errors.")
 
 
+@cli.command(name="export")
+@click.option("--output", "-o", default="ammon_artists.csv", metavar="FILE", help="Output CSV file")
+@click.option("--with-odesli", is_flag=True, help="Include Tidal/Deezer/Spotify IDs from odesli DB")
+@click.pass_context
+def export_artists(ctx, output, with_odesli):
+    """Export followed artists and their IDs to a CSV file."""
+    import csv, sqlite3
+
+    conn = _get_conn(ctx.obj["db"])
+    artists = _db.get_all_artists(conn)
+    conn.close()
+
+    # Load odesli platform IDs if requested
+    odesli_data = {}
+    if with_odesli:
+        odesli_db = Path.home() / ".odesli" / "music.db"
+        if odesli_db.exists():
+            oc = sqlite3.connect(str(odesli_db))
+            oc.row_factory = sqlite3.Row
+            for r in oc.execute("""
+                SELECT a.name, ap.platform, ap.platform_id
+                FROM artist_platforms ap
+                JOIN artists a ON a.id = ap.artist_id
+                WHERE ap.platform IN ('TIDAL','Deezer','Spotify','Apple Music')
+            """).fetchall():
+                key = r["name"].lower().strip()
+                odesli_data.setdefault(key, {})[r["platform"]] = r["platform_id"]
+            oc.close()
+
+    headers = ["Name", "Apple Music ID"]
+    if with_odesli:
+        headers += ["TIDAL ID", "Deezer ID", "Spotify ID"]
+
+    output_path = Path(output)
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(headers)
+        for a in artists:
+            row = [a["name"], a["apple_id"]]
+            if with_odesli:
+                extra = odesli_data.get(a["name"].lower().strip(), {})
+                row += [
+                    extra.get("TIDAL", ""),
+                    extra.get("Deezer", ""),
+                    extra.get("Spotify", ""),
+                ]
+            w.writerow(row)
+
+    click.echo(f"  Exported {len(artists)} artists to {output_path.resolve()}")
+
+
 def main():
     cli()
 
