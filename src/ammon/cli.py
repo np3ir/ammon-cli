@@ -239,6 +239,7 @@ def playlist_follow(ctx, playlist_id):
 @click.pass_context
 def playlist_unfollow(ctx, playlist_id):
     """Stop following a playlist."""
+    playlist_id = _parse_playlist_id(playlist_id)
     conn = _get_conn(ctx.obj["db"])
     pl = _db.get_playlist(conn, playlist_id)
     if not pl:
@@ -319,6 +320,7 @@ def playlist_refresh(ctx, download, playlist):
 @click.pass_context
 def playlist_extract_artists(ctx, playlist_id, follow):
     """Extract all artists from a playlist and optionally follow them."""
+    playlist_id = _parse_playlist_id(playlist_id)
     conn = _get_conn(ctx.obj["db"])
     apple_api = _get_api(ctx.obj["cookies"])
 
