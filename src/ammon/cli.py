@@ -199,10 +199,22 @@ def playlist():
     pass
 
 
+def _parse_playlist_id(value: str) -> str:
+    """Extract playlist ID from a full Apple Music URL or return as-is."""
+    if value.startswith("http"):
+        from urllib.parse import urlparse
+        path = urlparse(value).path
+        parts = [p for p in path.split("/") if p]
+        # Last segment is the ID
+        return parts[-1] if parts else value
+    return value
+
+
 @playlist.command(name="follow")
 @click.argument("playlist_id")
 @click.pass_context
 def playlist_follow(ctx, playlist_id):
+    playlist_id = _parse_playlist_id(playlist_id)
     """Follow a playlist by ID (e.g. pl.xxx or catalog album ID)."""
     conn = _get_conn(ctx.obj["db"])
     apple_api = _get_api(ctx.obj["cookies"])

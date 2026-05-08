@@ -119,11 +119,21 @@ def get_artist_all_albums(api: AppleMusicApi, artist_id: str,
     return all_albums
 
 
+def _is_library_playlist(playlist_id: str) -> bool:
+    return playlist_id.startswith("p.")
+
+
+def _playlist_base_url(api: AppleMusicApi, playlist_id: str) -> str:
+    if _is_library_playlist(playlist_id):
+        return f"https://amp-api.music.apple.com/v1/me/library/playlists/{playlist_id}"
+    return f"https://amp-api.music.apple.com/v1/catalog/{api.storefront.lower()}/playlists/{playlist_id}"
+
+
 def get_playlist_info(api: AppleMusicApi, playlist_id: str) -> dict | None:
-    """Fetch playlist name and basic info."""
+    """Fetch playlist name and basic info. Handles both catalog (pl.) and library (p.) playlists."""
     try:
         resp = api.session.get(
-            f"https://amp-api.music.apple.com/v1/catalog/{api.storefront.lower()}/playlists/{playlist_id}",
+            _playlist_base_url(api, playlist_id),
             params={"l": "en-US"}
         )
         if resp.status_code == 200:
@@ -138,7 +148,7 @@ def get_playlist_info(api: AppleMusicApi, playlist_id: str) -> dict | None:
 def get_playlist_tracks(api: AppleMusicApi, playlist_id: str) -> list[dict]:
     """Fetch all tracks in a playlist. Returns list of track dicts."""
     tracks = []
-    url = f"https://amp-api.music.apple.com/v1/catalog/{api.storefront.lower()}/playlists/{playlist_id}/tracks"
+    url = _playlist_base_url(api, playlist_id) + "/tracks"
     params = {"limit": 100, "l": "en-US"}
     try:
         while url:
