@@ -464,7 +464,7 @@ def export_artists(ctx, output, with_odesli):
         headers += ["TIDAL ID", "Deezer ID", "Spotify ID"]
 
     output_path = Path(output)
-    with open(output_path, "w", newline="", encoding="utf-8") as f:
+    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(headers)
         for a in artists:
