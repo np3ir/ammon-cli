@@ -339,18 +339,62 @@ def playlist_extract_artists(ctx, playlist_id, follow):
 
     click.echo(f"\n  Found {len(artist_ids)} unique artists in playlist\n")
 
-    added = 0
+    # Connect to odesli DB for sync (if available)
+    odesli_conn = None
+    if follow:
+        odesli_db = Path.home() / ".odesli" / "music.db"
+        if odesli_db.exists():
+            import sqlite3
+            odesli_conn = sqlite3.connect(str(odesli_db), timeout=10)
+            odesli_conn.row_factory = sqlite3.Row
+
+    added = odesli_added = 0
     for apple_id, name in artist_ids.items():
         click.echo(f"  {apple_id:<15} {name}")
         if follow:
+            # Add to ammon
             if not _db.get_artist(conn, apple_id):
                 _db.add_artist(conn, apple_id, name)
                 added += 1
 
+            # Sync to odesli
+            if odesli_conn:
+                try:
+                    # Find or create artist in odesli
+                    row = odesli_conn.execute(
+                        "SELECT id FROM artists WHERE name = ? COLLATE NOCASE", (name,)
+                    ).fetchone()
+                    if not row:
+                        cur = odesli_conn.execute(
+                            "INSERT OR IGNORE INTO artists (name, mbid) VALUES (?, '')", (name,)
+                        )
+                        artist_db_id = cur.lastrowid or odesli_conn.execute(
+                            "SELECT id FROM artists WHERE name=?", (name,)
+                        ).fetchone()["id"]
+                    else:
+                        artist_db_id = row["id"]
+
+                    odesli_conn.execute("""
+                        INSERT INTO artist_platforms (artist_id, platform, platform_id, url)
+                        VALUES (?, 'Apple Music', ?, ?)
+                        ON CONFLICT(artist_id, platform) DO UPDATE SET
+                            platform_id = excluded.platform_id,
+                            url = excluded.url
+                    """, (artist_db_id, apple_id,
+                          f"https://music.apple.com/us/artist/{apple_id}"))
+                    odesli_added += 1
+                except Exception:
+                    pass
+
+    if odesli_conn:
+        odesli_conn.commit()
+        odesli_conn.close()
+
     if follow:
-        click.echo(f"\n  + Added {added} new artists to follow list.")
+        click.echo(f"\n  + Added {added} new artists to ammon.")
+        click.echo(f"  + Synced {odesli_added} artists to odesli DB.")
     else:
-        click.echo(f"\n  Run with --follow to add these artists to ammon.")
+        click.echo(f"\n  Run with --follow to add these artists to ammon + odesli.")
 
     conn.close()
 
