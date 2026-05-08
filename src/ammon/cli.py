@@ -173,6 +173,7 @@ def import_odesli(ctx, db_path):
         FROM artist_platforms ap
         JOIN artists a ON a.id = ap.artist_id
         WHERE ap.platform = 'Apple Music'
+        GROUP BY ap.platform_id
     """).fetchall()
     oconn.close()
 
