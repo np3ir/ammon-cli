@@ -39,10 +39,14 @@ def cli(ctx, db, cookies):
 
 
 @cli.command()
-@click.argument("artist_id")
+@click.argument("artist_id", metavar="APPLE_ID")
 @click.pass_context
 def follow(ctx, artist_id):
-    """Follow an Apple Music artist by ID."""
+    """Follow an Apple Music artist by their numeric ID.
+
+    APPLE_ID is the numeric Apple Music artist ID.
+    Example: ammon follow 1445958214
+    """
     conn = _get_conn(ctx.obj["db"])
     apple_api = _get_api(ctx.obj["cookies"])
 
@@ -57,10 +61,14 @@ def follow(ctx, artist_id):
 
 
 @cli.command()
-@click.argument("artist_id")
+@click.argument("artist_id", metavar="APPLE_ID")
 @click.pass_context
 def unfollow(ctx, artist_id):
-    """Stop following an Apple Music artist."""
+    """Stop following an Apple Music artist.
+
+    APPLE_ID is the numeric Apple Music artist ID.
+    Example: ammon unfollow 1445958214
+    """
     conn = _get_conn(ctx.obj["db"])
     artist = _db.get_artist(conn, artist_id)
     if not artist:
@@ -94,12 +102,22 @@ def list_artists(ctx):
 
 
 @cli.command()
-@click.option("--download", "-d", is_flag=True, help="Download new releases automatically")
+@click.option("--download", "-d", is_flag=True, help="Download new releases automatically via orpheus")
 @click.option("--since", "-s", default=None, metavar="YYYY-MM-DD", help="Only check releases from this date")
 @click.option("--artist", "-a", default=None, metavar="APPLE_ID", help="Refresh only this artist")
 @click.pass_context
 def refresh(ctx, download, since, artist):
-    """Check for new releases from followed artists."""
+    """Check for new releases from followed artists.
+
+    Scans all 167 Apple Music storefronts in parallel.
+    Use --download to automatically download via orpheus.
+
+    Examples:\n
+      ammon refresh\n
+      ammon refresh --download\n
+      ammon refresh --download --since 2025-01-01\n
+      ammon refresh --artist 1445958214
+    """
     conn = _get_conn(ctx.obj["db"])
     apple_api = _get_api(ctx.obj["cookies"])
 
@@ -130,10 +148,13 @@ def refresh(ctx, download, since, artist):
 
 
 @cli.command()
-@click.option("--pending", "-p", is_flag=True, help="Show pending downloads")
+@click.option("--pending", "-p", is_flag=True, help="List albums pending download")
 @click.pass_context
 def status(ctx, pending):
-    """Show database statistics."""
+    """Show database statistics: artists, albums discovered, pending downloads.
+
+    Use --pending to list albums that were detected but not yet downloaded.
+    """
     conn = _get_conn(ctx.obj["db"])
     stats = _db.get_stats(conn)
     click.echo(f"\n  Artists followed : {stats['artists']}")
@@ -156,10 +177,14 @@ def status(ctx, pending):
 
 
 @cli.command(name="import-odesli")
-@click.option("--db-path", default=None, metavar="PATH", help="odesli DB path")
+@click.option("--db-path", default=None, metavar="PATH", help="odesli DB path (default: ~/.odesli/music.db)")
 @click.pass_context
 def import_odesli(ctx, db_path):
-    """Import Apple Music artist IDs from odesli database."""
+    """Import Apple Music artist IDs from odesli cross-platform database.
+
+    Reads artists that have an Apple Music ID in odesli and adds them
+    to the ammon follow list. Skips artists already followed.
+    """
     import sqlite3
     odesli_db = Path(db_path) if db_path else Path.home() / ".odesli" / "music.db"
     if not odesli_db.exists():
@@ -211,11 +236,20 @@ def _parse_playlist_id(value: str) -> str:
 
 
 @playlist.command(name="follow")
-@click.argument("playlist_id")
+@click.argument("playlist_id", metavar="ID_OR_URL")
 @click.pass_context
 def playlist_follow(ctx, playlist_id):
+    """Follow a playlist to monitor for new tracks.
+
+    Accepts a playlist ID or full Apple Music URL.
+    Seeds existing tracks silently — only future additions trigger alerts.
+    Supports catalog playlists (pl.xxx) and personal library playlists (p.xxx).
+
+    Examples:\n
+      ammon playlist follow pl.4b364b8b182f4115acbf6deb83bd5222\n
+      ammon playlist follow "https://music.apple.com/library/playlist/p.xxx"
+    """
     playlist_id = _parse_playlist_id(playlist_id)
-    """Follow a playlist by ID (e.g. pl.xxx or catalog album ID)."""
     conn = _get_conn(ctx.obj["db"])
     apple_api = _get_api(ctx.obj["cookies"])
     info = _api.get_playlist_info(apple_api, playlist_id)
@@ -235,10 +269,13 @@ def playlist_follow(ctx, playlist_id):
 
 
 @playlist.command(name="unfollow")
-@click.argument("playlist_id")
+@click.argument("playlist_id", metavar="ID_OR_URL")
 @click.pass_context
 def playlist_unfollow(ctx, playlist_id):
-    """Stop following a playlist."""
+    """Stop monitoring a playlist for new tracks.
+
+    Accepts a playlist ID or full Apple Music URL.
+    """
     playlist_id = _parse_playlist_id(playlist_id)
     conn = _get_conn(ctx.obj["db"])
     pl = _db.get_playlist(conn, playlist_id)
@@ -269,11 +306,20 @@ def playlist_list(ctx):
 
 
 @playlist.command(name="refresh")
-@click.option("--download", "-d", is_flag=True, help="Download new tracks automatically")
-@click.option("--playlist", "-p", default=None, metavar="ID", help="Refresh only this playlist")
+@click.option("--download", "-d", is_flag=True, help="Download new tracks automatically via orpheus")
+@click.option("--playlist", "-p", default=None, metavar="ID_OR_URL", help="Refresh only this playlist")
 @click.pass_context
 def playlist_refresh(ctx, download, playlist):
-    """Check followed playlists for new tracks."""
+    """Check followed playlists for newly added tracks.
+
+    Compares current playlist contents against seeded tracks.
+    Only alerts on tracks added AFTER the playlist was followed.
+
+    Examples:\n
+      ammon playlist refresh\n
+      ammon playlist refresh --download\n
+      ammon playlist refresh --playlist pl.4b364b8b182f4115acbf6deb83bd5222
+    """
     conn = _get_conn(ctx.obj["db"])
     apple_api = _get_api(ctx.obj["cookies"])
 
@@ -315,11 +361,21 @@ def playlist_refresh(ctx, download, playlist):
 
 
 @playlist.command(name="extract-artists")
-@click.argument("playlist_id")
-@click.option("--follow", "-f", is_flag=True, help="Add extracted artists to ammon follow list")
+@click.argument("playlist_id", metavar="ID_OR_URL")
+@click.option("--follow", "-f", is_flag=True, help="Add artists to ammon follow list and sync to odesli")
 @click.pass_context
 def playlist_extract_artists(ctx, playlist_id, follow):
-    """Extract all artists from a playlist and optionally follow them."""
+    """Extract all unique artists from a playlist.
+
+    Use --follow to add them to ammon's artist follow list and
+    automatically sync their Apple Music IDs to the odesli database.
+
+    Works with catalog playlists (pl.xxx) and personal library playlists (p.xxx).
+
+    Examples:\n
+      ammon playlist extract-artists pl.4b364b8b182f4115acbf6deb83bd5222\n
+      ammon playlist extract-artists "https://music.apple.com/library/playlist/p.xxx" --follow
+    """
     playlist_id = _parse_playlist_id(playlist_id)
     conn = _get_conn(ctx.obj["db"])
     apple_api = _get_api(ctx.obj["cookies"])
@@ -403,7 +459,10 @@ def playlist_extract_artists(ctx, playlist_id, follow):
 @cli.command(name="download-pending")
 @click.pass_context
 def download_pending(ctx):
-    """Download all pending (not yet downloaded) albums."""
+    """Download all albums that were detected but not yet downloaded.
+
+    Use 'ammon status --pending' first to preview what will be downloaded.
+    """
     from . import downloader as _dl
     conn = _get_conn(ctx.obj["db"])
     pending = _db.get_pending_downloads(conn)
@@ -431,11 +490,19 @@ def download_pending(ctx):
 
 
 @cli.command(name="export")
-@click.option("--output", "-o", default="ammon_artists.csv", metavar="FILE", help="Output CSV file")
-@click.option("--with-odesli", is_flag=True, help="Include Tidal/Deezer/Spotify IDs from odesli DB")
+@click.option("--output", "-o", default="ammon_artists.csv", metavar="FILE", help="Output CSV path (default: ammon_artists.csv)")
+@click.option("--with-odesli", is_flag=True, help="Also include Tidal/Deezer/Spotify IDs from odesli DB")
 @click.pass_context
 def export_artists(ctx, output, with_odesli):
-    """Export followed artists and their IDs to a CSV file."""
+    """Export followed artists and their Apple Music IDs to a CSV file.
+
+    Use --with-odesli to enrich the export with Tidal, Deezer and
+    Spotify IDs from the odesli cross-platform database.
+
+    Examples:\n
+      ammon export\n
+      ammon export --with-odesli -o my_artists.csv
+    """
     import csv, sqlite3
 
     conn = _get_conn(ctx.obj["db"])
