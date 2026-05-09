@@ -457,26 +457,40 @@ def playlist_extract_artists(ctx, playlist_id, follow):
 
 
 @cli.command(name="download-pending")
+@click.option("--force", "-f", is_flag=True, help="Re-download all albums, including already downloaded ones")
 @click.pass_context
-def download_pending(ctx):
-    """Download all albums that were detected but not yet downloaded.
+def download_pending(ctx, force):
+    """Download albums detected by refresh.
 
-    Use 'ammon status --pending' first to preview what will be downloaded.
+    By default downloads only pending (not yet downloaded) albums.
+    Use --force to re-download everything in the DB regardless of status
+    (useful after wiping your music library).
+
+    Examples:\n
+      ammon download-pending\n
+      ammon download-pending --force
     """
     from . import downloader as _dl
     conn = _get_conn(ctx.obj["db"])
-    pending = _db.get_pending_downloads(conn)
 
-    if not pending:
-        click.echo("  No pending downloads.")
+    if force:
+        rows = conn.execute("SELECT * FROM albums ORDER BY release_date DESC").fetchall()
+        albums = [dict(r) for r in rows]
+        label = "all"
+    else:
+        albums = _db.get_pending_downloads(conn)
+        label = "pending"
+
+    if not albums:
+        click.echo(f"  No {label} albums.")
         conn.close()
         return
 
-    click.echo(f"\n  Downloading {len(pending)} pending album(s)...\n")
+    click.echo(f"\n  Downloading {len(albums)} {label} album(s)...\n")
     ok = errors = 0
-    for i, album in enumerate(pending, 1):
-        click.echo(f"  [{i}/{len(pending)}] {album['name']} ({album['apple_id']})")
-        success, msg = _dl.download_album(album["apple_id"], album["storefront"] or "us")
+    for i, album in enumerate(albums, 1):
+        click.echo(f"  [{i}/{len(albums)}] {album['name']} ({album['apple_id']})")
+        success, msg = _dl.download_album(album["apple_id"], album.get("storefront") or "us")
         if success:
             _db.mark_downloaded(conn, album["apple_id"])
             ok += 1
