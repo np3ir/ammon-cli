@@ -458,28 +458,53 @@ def playlist_extract_artists(ctx, playlist_id, follow):
 
 @cli.command(name="download-pending")
 @click.option("--force", "-f", is_flag=True, help="Re-download all albums, including already downloaded ones")
+@click.option("--since", "-s", default=None, metavar="YYYY-MM-DD", help="Only albums released from this date")
+@click.option("--days", "-d", default=None, type=int, metavar="N", help="Only albums from the last N days")
 @click.pass_context
-def download_pending(ctx, force):
+def download_pending(ctx, force, since, days):
     """Download albums detected by refresh.
 
     By default downloads only pending (not yet downloaded) albums.
-    Use --force to re-download everything in the DB regardless of status
-    (useful after wiping your music library).
+    Use --force to re-download everything regardless of status.
+    Combine with --since or --days to limit by release date.
 
     Examples:\n
       ammon download-pending\n
-      ammon download-pending --force
+      ammon download-pending --force\n
+      ammon download-pending --force --since 2026-01-01\n
+      ammon download-pending --force --days 90
     """
+    import datetime
     from . import downloader as _dl
     conn = _get_conn(ctx.obj["db"])
 
+    # Resolve date filter
+    date_filter = None
+    if days:
+        date_filter = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    elif since:
+        date_filter = since
+
     if force:
-        rows = conn.execute("SELECT * FROM albums ORDER BY release_date DESC").fetchall()
+        query = "SELECT * FROM albums"
+        params = []
+        if date_filter:
+            query += " WHERE release_date >= ?"
+            params.append(date_filter)
+        query += " ORDER BY release_date DESC"
+        rows = conn.execute(query, params).fetchall()
         albums = [dict(r) for r in rows]
-        label = "all"
+        label = f"all{' since ' + date_filter if date_filter else ''}"
     else:
-        albums = _db.get_pending_downloads(conn)
-        label = "pending"
+        if date_filter:
+            rows = conn.execute(
+                "SELECT * FROM albums WHERE downloaded=0 AND release_date >= ? ORDER BY release_date DESC",
+                (date_filter,)
+            ).fetchall()
+            albums = [dict(r) for r in rows]
+        else:
+            albums = _db.get_pending_downloads(conn)
+        label = f"pending{' since ' + date_filter if date_filter else ''}"
 
     if not albums:
         click.echo(f"  No {label} albums.")
