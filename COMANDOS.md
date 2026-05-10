@@ -95,10 +95,19 @@ ammon status --pending
 ---
 
 ### `ammon download-pending`
-Descarga todos los álbumes que fueron detectados pero no descargados aún.
+Descarga álbumes detectados por refresh.
+
+- Sin flags: solo los pendientes (no descargados aún)
+- `--force`: re-descarga **todo** sin importar el estado — útil después de borrar la librería
+- `--since YYYY-MM-DD`: solo álbumes lanzados desde esa fecha
+- `--days N`: solo álbumes de los últimos N días
 
 ```bash
-ammon download-pending
+ammon download-pending                              # solo pendientes
+ammon download-pending --force                      # re-descargar todo
+ammon download-pending --force --since 2026-01-01  # todo desde fecha
+ammon download-pending --force --days 90           # últimos 90 días
+ammon download-pending --days 30                   # pendientes últimos 30 días
 ```
 
 ---

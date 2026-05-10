@@ -76,7 +76,12 @@ ammon playlist refresh --download
 | `ammon refresh --artist <id>` | Refresh a single artist |
 | `ammon status` | Show DB statistics |
 | `ammon status --pending` | Show pending downloads |
-| `ammon download-pending` | Download all pending albums |
+| `ammon download-pending` | Download pending albums |
+| `ammon download-pending --force` | Re-download all albums (useful after wiping library) |
+| `ammon download-pending --force --since YYYY-MM-DD` | Re-download all from date |
+| `ammon download-pending --force --days N` | Re-download last N days |
+| `ammon export` | Export artists to CSV (Apple Music IDs) |
+| `ammon export --with-odesli` | Export with Tidal/Deezer/Spotify IDs |
 | `ammon import-odesli` | Import Apple Music IDs from odesli DB |
 
 ### Playlists
