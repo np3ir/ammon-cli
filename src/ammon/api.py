@@ -50,6 +50,34 @@ def get_artist_name(api: AppleMusicApi, artist_id: str) -> str | None:
     return None
 
 
+_RELEASE_SUFFIXES = (
+    " - Single", " - single",
+    " - EP", " - ep",
+    " - Album", " - album",
+)
+
+def _strip_release_suffix(name: str) -> str:
+    """Remove ' - Single', ' - EP', etc. from album names — matches Orpheus behaviour."""
+    for suffix in _RELEASE_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: len(name) - len(suffix)].strip()
+    return name
+
+
+def _parse_album_attrs(album: dict, storefront: str) -> dict:
+    attrs = album.get("attributes", {})
+    return {
+        "apple_id":       album["id"],
+        "name":           _strip_release_suffix(attrs.get("name", "")),
+        "release_date":   attrs.get("releaseDate", ""),
+        "storefront":     storefront,
+        "is_single":      attrs.get("isSingle", False),
+        "is_compilation": attrs.get("isCompilation", False),
+        "track_count":    attrs.get("trackCount", 0),
+        "kind":           (attrs.get("playParams", {}) or {}).get("kind", ""),
+    }
+
+
 def _fetch_albums_storefront(api: AppleMusicApi, artist_id: str, storefront: str) -> dict:
     """Fetch all album IDs for an artist in one storefront. Returns {album_id: album_data}."""
     result = {}
@@ -61,16 +89,7 @@ def _fetch_albums_storefront(api: AppleMusicApi, artist_id: str, storefront: str
             return result
         data = resp.json()
         for album in data.get("data", []):
-            attrs = album.get("attributes", {})
-            result[album["id"]] = {
-                "apple_id":    album["id"],
-                "name":        attrs.get("name", ""),
-                "release_date": attrs.get("releaseDate", ""),
-                "storefront":  storefront,
-                "is_single":   attrs.get("isSingle", False),
-                "is_compilation": attrs.get("isCompilation", False),
-                "track_count": attrs.get("trackCount", 0),
-            }
+            result[album["id"]] = _parse_album_attrs(album, storefront)
         next_path = data.get("next")
         while next_path:
             resp = api.session.get(
@@ -80,16 +99,7 @@ def _fetch_albums_storefront(api: AppleMusicApi, artist_id: str, storefront: str
                 break
             data = resp.json()
             for album in data.get("data", []):
-                attrs = album.get("attributes", {})
-                result.setdefault(album["id"], {
-                    "apple_id":    album["id"],
-                    "name":        attrs.get("name", ""),
-                    "release_date": attrs.get("releaseDate", ""),
-                    "storefront":  storefront,
-                    "is_single":   attrs.get("isSingle", False),
-                    "is_compilation": attrs.get("isCompilation", False),
-                    "track_count": attrs.get("trackCount", 0),
-                })
+                result.setdefault(album["id"], _parse_album_attrs(album, storefront))
             next_path = data.get("next")
     except Exception:
         pass
@@ -99,22 +109,37 @@ def _fetch_albums_storefront(api: AppleMusicApi, artist_id: str, storefront: str
 def get_artist_all_albums(api: AppleMusicApi, artist_id: str,
                           storefronts: list[str] | None = None,
                           workers: int = 25) -> dict:
-    """Scan all storefronts and return merged {album_id: album_data}."""
+    """Scan all storefronts and return merged {album_id: album_data}.
+
+    Priority when the same album appears in multiple storefronts:
+    'us' > primary > any foreign storefront.
+    This ensures isSingle/trackCount/playParams are consistent with Orpheus.
+    """
     if storefronts is None:
         storefronts = get_all_storefronts(api)
 
     primary = api.storefront.lower()
     ordered = [primary, "us"] + [s for s in storefronts if s not in (primary, "us")]
 
-    all_albums = {}
+    # Collect ALL results first, keyed by storefront
+    results_by_sf: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(_fetch_albums_storefront, api, artist_id, sf): sf
             for sf in ordered
         }
         for future in as_completed(futures):
-            for album_id, album_data in future.result().items():
-                all_albums.setdefault(album_id, album_data)
+            sf = futures[future]
+            results_by_sf[sf] = future.result()
+
+    # Merge in priority order: us > primary > foreign
+    priority = ["us"] + ([primary] if primary != "us" else []) + \
+               [s for s in ordered if s not in ("us", primary)]
+
+    all_albums: dict = {}
+    for sf in priority:
+        for album_id, album_data in results_by_sf.get(sf, {}).items():
+            all_albums.setdefault(album_id, album_data)
 
     return all_albums
 
@@ -202,8 +227,11 @@ def get_playlist_tracks(api: AppleMusicApi, playlist_id: str) -> list[dict]:
 
 
 def get_release_type(album_data: dict) -> str:
+    """Mirrors Orpheus's get_album_info() release type logic exactly."""
     if album_data.get("is_compilation"):
         return "COMPILATION"
     if album_data.get("is_single") or album_data.get("track_count") == 1:
         return "SINGLE"
-    return "ALBUM"
+    kind = (album_data.get("kind") or "").lower()
+    return {"album": "ALBUM", "single": "SINGLE", "ep": "EP",
+            "compilation": "COMPILATION"}.get(kind, "ALBUM")
