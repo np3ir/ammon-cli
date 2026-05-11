@@ -147,6 +147,75 @@ def refresh(ctx, download, since, artist):
     conn.close()
 
 
+@cli.command(name="refresh-all")
+@click.option("--download", "-d", is_flag=True, help="Download new releases and new playlist tracks via orpheus")
+@click.option("--since", "-s", default=None, metavar="YYYY-MM-DD", help="Only check artist releases from this date")
+@click.pass_context
+def refresh_all(ctx, download, since):
+    """Check artists AND playlists in one command.
+
+    Runs artist refresh (all 167 storefronts) followed by playlist refresh.
+    Use --download to automatically download everything new via orpheus.
+
+    Examples:\n
+      ammon refresh-all\n
+      ammon refresh-all --download\n
+      ammon refresh-all --download --since 2025-01-01
+    """
+    from . import downloader as _dl
+
+    conn = _get_conn(ctx.obj["db"])
+    apple_api = _get_api(ctx.obj["cookies"])
+
+    # ── Artists ───────────────────────────────────────────────────────────────
+    artists = _db.get_all_artists(conn)
+    if artists:
+        click.echo(f"\n  [Artists] Scanning {len(artists)} artist(s)...\n")
+        a_new = a_dl = a_err = 0
+        for a in artists:
+            result = _monitor.refresh_artist(
+                conn, apple_api, a["apple_id"],
+                download=download, since=since, verbose=True
+            )
+            a_new += result["new"]
+            a_dl  += result["downloaded"]
+            a_err += result["errors"]
+        click.echo(f"\n  [Artists] Done — {a_new} new, {a_dl} downloaded, {a_err} errors.")
+    else:
+        click.echo("\n  [Artists] No artists followed — skipping.")
+
+    # ── Playlists ─────────────────────────────────────────────────────────────
+    playlists = _db.get_all_playlists(conn)
+    if playlists:
+        click.echo(f"\n  [Playlists] Checking {len(playlists)} playlist(s)...\n")
+        p_new = p_dl = p_err = 0
+        for pl in playlists:
+            click.echo(f"  Checking: {pl['name']} ({pl['apple_id']})...")
+            tracks = _api.get_playlist_tracks(apple_api, pl["apple_id"])
+            for t in tracks:
+                is_new = _db.add_playlist_track(
+                    conn, pl["apple_id"], t["track_id"], t["track_name"], t["artist_name"]
+                )
+                if is_new:
+                    p_new += 1
+                    click.echo(f"    + NEW: {t['artist_name']} - {t['track_name']} ({t['track_id']})")
+                    if download:
+                        ok, msg = _dl.download_track(t["track_id"])
+                        if ok:
+                            _db.mark_track_downloaded(conn, pl["apple_id"], t["track_id"])
+                            p_dl += 1
+                            click.echo(f"      + Downloaded")
+                        else:
+                            p_err += 1
+                            click.echo(f"      x {msg}")
+            _db.update_playlist_last_check(conn, pl["apple_id"])
+        click.echo(f"\n  [Playlists] Done — {p_new} new, {p_dl} downloaded, {p_err} errors.")
+    else:
+        click.echo("\n  [Playlists] No playlists followed — skipping.")
+
+    conn.close()
+
+
 @cli.command()
 @click.option("--pending", "-p", is_flag=True, help="List albums pending download")
 @click.pass_context

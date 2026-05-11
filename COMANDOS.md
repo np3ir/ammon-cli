@@ -125,6 +125,30 @@ ammon import-odesli --db-path "D:/music.db"
 
 ---
 
+## Combinado
+
+### `ammon refresh-all`
+Refresca artistas **y** playlists en un solo comando.
+Primero escanea los 167 storefronts por nuevos lanzamientos de artistas, luego chequea todas las playlists seguidas por tracks nuevos.
+
+```bash
+# Solo detectar
+ammon refresh-all
+
+# Detectar y descargar todo (artistas + playlists)
+ammon refresh-all --download
+
+# Solo lanzamientos de artistas desde una fecha
+ammon refresh-all --download --since 2025-01-01
+```
+
+| Opción | Descripción |
+|--------|-------------|
+| `--download, -d` | Descarga nuevos lanzamientos y tracks via orpheus |
+| `--since YYYY-MM-DD` | Solo chequea lanzamientos de artistas desde esta fecha |
+
+---
+
 ## Playlists
 
 ### `ammon playlist follow <id_o_url>`
@@ -216,17 +240,18 @@ ammon import-odesli
 ammon playlist follow "https://music.apple.com/library/playlist/p.xxx"
 ammon playlist extract-artists "https://music.apple.com/library/playlist/p.xxx" --follow
 
-# 3. Chequear nuevos lanzamientos
-ammon refresh --download
+# 3. Chequear y descargar todo de una vez (artistas + playlists)
+ammon refresh-all --download
+
+# — O por separado —
+ammon refresh --download           # solo artistas
+ammon playlist refresh --download  # solo playlists
 
 # 4. Ver estado
 ammon status --pending
 
 # 5. Descargar lo que quedó pendiente
 ammon download-pending
-
-# 6. Monitorear playlists
-ammon playlist refresh --download
 ```
 
 ---

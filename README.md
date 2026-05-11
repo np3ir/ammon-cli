@@ -57,6 +57,9 @@ ammon refresh --download
 
 # Check playlists for new tracks and download
 ammon playlist refresh --download
+
+# Check artists AND playlists in one command
+ammon refresh-all --download
 ```
 
 ---
@@ -83,6 +86,14 @@ ammon playlist refresh --download
 | `ammon export` | Export artists to CSV (Apple Music IDs) |
 | `ammon export --with-odesli` | Export with Tidal/Deezer/Spotify IDs |
 | `ammon import-odesli` | Import Apple Music IDs from odesli DB |
+
+### Combined
+
+| Command | Description |
+|---------|-------------|
+| `ammon refresh-all` | Check artists AND playlists in one command |
+| `ammon refresh-all --download` | Check and auto-download everything new |
+| `ammon refresh-all --download --since YYYY-MM-DD` | Same, artists only from this date |
 
 ### Playlists
 
