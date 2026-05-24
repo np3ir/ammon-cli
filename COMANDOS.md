@@ -79,6 +79,7 @@ ammon refresh --download --since 2024-06-01 --artist 159260351
 | `--download, -d` | Descarga los nuevos lanzamientos via orpheus |
 | `--since YYYY-MM-DD` | Solo chequea lanzamientos desde esta fecha |
 | `--artist ID` | Solo refresca este artista |
+| `--min-interval N` | Skipea artistas chequeados hace menos de N horas (default: 24) |
 
 ---
 
@@ -109,6 +110,24 @@ ammon download-pending --force --since 2026-01-01  # todo desde fecha
 ammon download-pending --force --days 90           # últimos 90 días
 ammon download-pending --days 30                   # pendientes últimos 30 días
 ```
+
+---
+
+### `ammon export`
+Exporta los artistas seguidos y sus Apple Music IDs a un archivo CSV.
+Opcionalmente enriquece el CSV con IDs de TIDAL, Deezer y Spotify desde la DB de odesli.
+
+```bash
+ammon export                                    # CSV con nombre+Apple ID
+ammon export -o mis_artistas.csv               # ruta de salida personalizada
+ammon export --with-odesli                     # incluye TIDAL/Deezer/Spotify IDs
+ammon export --with-odesli -o artistas.csv
+```
+
+| Opción | Descripción |
+|--------|-------------|
+| `--output, -o FILE` | Ruta de salida (default: `ammon_artists.csv`) |
+| `--with-odesli` | Añade IDs de TIDAL, Deezer y Spotify desde odesli |
 
 ---
 
@@ -217,16 +236,30 @@ Cuando se usa `--follow`:
 - **Sincroniza automáticamente los Apple IDs a la DB de odesli**
 - Para playlists de biblioteca personal, extrae IDs desde el catálogo (no los IDs de biblioteca)
 
+Cuando se usa `--output`:
+- Exporta los artistas a un archivo CSV o TXT con Apple Music ID y nombre
+
 ```bash
 # Solo ver qué artistas hay
 ammon playlist extract-artists "https://music.apple.com/library/playlist/p.ldvAJK1coEp23Y"
 
-# Agregar a ammon + sincronizar a odesli
-ammon playlist extract-artists "https://music.apple.com/library/playlist/p.ldvAJK1coEp23Y" --follow
+# Exportar a CSV (Apple Music ID + Nombre)
+ammon playlist extract-artists <url> --output artistas.csv
+
+# Exportar a TXT (tab-separado)
+ammon playlist extract-artists <url> --output artistas.txt
+
+# Exportar Y añadir a ammon + odesli
+ammon playlist extract-artists <url> --output artistas.csv --follow
 
 # Playlist de catálogo
 ammon playlist extract-artists pl.4b364b8b182f4115acbf6deb83bd5222 --follow
 ```
+
+| Opción | Descripción |
+|--------|-------------|
+| `--follow, -f` | Agrega artistas a ammon y sincroniza a odesli |
+| `--output, -o FILE` | Exporta a CSV (dos columnas) o TXT (tab-separado) |
 
 ---
 
@@ -252,6 +285,18 @@ ammon status --pending
 
 # 5. Descargar lo que quedó pendiente
 ammon download-pending
+```
+
+---
+
+## Export / Backup
+
+```bash
+# Exportar lista de artistas a CSV
+ammon export -o backup_artistas.csv
+
+# Exportar con IDs de otras plataformas
+ammon export --with-odesli -o artistas_completo.csv
 ```
 
 ---

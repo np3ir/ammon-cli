@@ -42,11 +42,12 @@ def _init(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_albums_downloaded ON albums(downloaded);
 
         CREATE TABLE IF NOT EXISTS playlists (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            apple_id   TEXT    UNIQUE NOT NULL,
-            name       TEXT,
-            added_at   INTEGER DEFAULT (strftime('%s','now')),
-            last_check INTEGER DEFAULT 0
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            apple_id      TEXT    UNIQUE NOT NULL,
+            name          TEXT,
+            added_at      INTEGER DEFAULT (strftime('%s','now')),
+            last_check    INTEGER DEFAULT 0,
+            last_modified TEXT    DEFAULT NULL
         );
 
         CREATE TABLE IF NOT EXISTS playlist_tracks (
@@ -63,6 +64,10 @@ def _init(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playlist_id);
         CREATE INDEX IF NOT EXISTS idx_playlist_tracks_dl ON playlist_tracks(downloaded);
     """)
+    # Migrations
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(playlists)").fetchall()}
+    if "last_modified" not in existing:
+        conn.execute("ALTER TABLE playlists ADD COLUMN last_modified TEXT DEFAULT NULL")
     conn.commit()
 
 
@@ -165,10 +170,17 @@ def get_playlist(conn, apple_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-def update_playlist_last_check(conn, apple_id: str):
-    conn.execute("UPDATE playlists SET last_check=? WHERE apple_id=?",
-                 (int(time.time()), apple_id))
+def update_playlist_last_check(conn, apple_id: str, last_modified: str = None):
+    conn.execute(
+        "UPDATE playlists SET last_check=?, last_modified=COALESCE(?, last_modified) WHERE apple_id=?",
+        (int(time.time()), last_modified, apple_id)
+    )
     conn.commit()
+
+
+def get_playlist_last_modified(conn, apple_id: str) -> str | None:
+    row = conn.execute("SELECT last_modified FROM playlists WHERE apple_id=?", (apple_id,)).fetchone()
+    return row["last_modified"] if row else None
 
 
 def add_playlist_track(conn, playlist_id: str, track_id: str,

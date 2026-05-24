@@ -105,8 +105,9 @@ def list_artists(ctx):
 @click.option("--download", "-d", is_flag=True, help="Download new releases automatically via orpheus")
 @click.option("--since", "-s", default=None, metavar="YYYY-MM-DD", help="Only check releases from this date")
 @click.option("--artist", "-a", default=None, metavar="APPLE_ID", help="Refresh only this artist")
+@click.option("--min-interval", "-i", default=24, type=int, metavar="HOURS", help="Skip artists checked within this many hours (default: 24)")
 @click.pass_context
-def refresh(ctx, download, since, artist):
+def refresh(ctx, download, since, artist, min_interval):
     """Check for new releases from followed artists.
 
     Scans all 167 Apple Music storefronts in parallel.
@@ -131,10 +132,18 @@ def refresh(ctx, download, since, artist):
         conn.close()
         return
 
-    total_new = total_dl = total_err = 0
+    import time
+    min_interval_secs = min_interval * 3600
+    now = int(time.time())
+
+    total_new = total_dl = total_err = total_skipped = 0
     click.echo(f"\n  Scanning {len(artists)} artist(s)...\n")
 
     for a in artists:
+        last = a.get("last_check") or 0
+        if not artist and min_interval > 0 and (now - last) < min_interval_secs:
+            total_skipped += 1
+            continue
         result = _monitor.refresh_artist(
             conn, apple_api, a["apple_id"],
             download=download, since=since, verbose=True
@@ -143,15 +152,16 @@ def refresh(ctx, download, since, artist):
         total_dl  += result["downloaded"]
         total_err += result["errors"]
 
-    click.echo(f"\n  Done — {total_new} new, {total_dl} downloaded, {total_err} errors.")
+    click.echo(f"\n  Done — {total_new} new, {total_dl} downloaded, {total_err} errors, {total_skipped} skipped (checked < {min_interval}h ago).")
     conn.close()
 
 
 @cli.command(name="refresh-all")
 @click.option("--download", "-d", is_flag=True, help="Download new releases and new playlist tracks via orpheus")
 @click.option("--since", "-s", default=None, metavar="YYYY-MM-DD", help="Only check artist releases from this date")
+@click.option("--min-interval", "-i", default=24, type=int, metavar="HOURS", help="Skip artists checked within this many hours (default: 24)")
 @click.pass_context
-def refresh_all(ctx, download, since):
+def refresh_all(ctx, download, since, min_interval):
     """Check artists AND playlists in one command.
 
     Runs artist refresh (all 167 storefronts) followed by playlist refresh.
@@ -168,11 +178,19 @@ def refresh_all(ctx, download, since):
     apple_api = _get_api(ctx.obj["cookies"])
 
     # ── Artists ───────────────────────────────────────────────────────────────
+    import time as _time
+    min_interval_secs = min_interval * 3600
+    now = int(_time.time())
+
     artists = _db.get_all_artists(conn)
     if artists:
         click.echo(f"\n  [Artists] Scanning {len(artists)} artist(s)...\n")
-        a_new = a_dl = a_err = 0
+        a_new = a_dl = a_err = a_skipped = 0
         for a in artists:
+            last = a.get("last_check") or 0
+            if min_interval > 0 and (now - last) < min_interval_secs:
+                a_skipped += 1
+                continue
             result = _monitor.refresh_artist(
                 conn, apple_api, a["apple_id"],
                 download=download, since=since, verbose=True
@@ -180,7 +198,7 @@ def refresh_all(ctx, download, since):
             a_new += result["new"]
             a_dl  += result["downloaded"]
             a_err += result["errors"]
-        click.echo(f"\n  [Artists] Done — {a_new} new, {a_dl} downloaded, {a_err} errors.")
+        click.echo(f"\n  [Artists] Done — {a_new} new, {a_dl} downloaded, {a_err} errors, {a_skipped} skipped (< {min_interval}h ago).")
     else:
         click.echo("\n  [Artists] No artists followed — skipping.")
 
@@ -190,6 +208,14 @@ def refresh_all(ctx, download, since):
         click.echo(f"\n  [Playlists] Checking {len(playlists)} playlist(s)...\n")
         p_new = p_dl = p_err = 0
         for pl in playlists:
+            info = _api.get_playlist_info(apple_api, pl["apple_id"])
+            remote_lm = info.get("last_modified") if info else None
+            stored_lm = pl.get("last_modified")
+
+            if remote_lm and stored_lm and remote_lm == stored_lm:
+                click.echo(f"  Skipping: {pl['name']} — not modified since {remote_lm[:10]}")
+                continue
+
             click.echo(f"  Checking: {pl['name']} ({pl['apple_id']})...")
             tracks = _api.get_playlist_tracks(apple_api, pl["apple_id"])
             for t in tracks:
@@ -208,7 +234,7 @@ def refresh_all(ctx, download, since):
                         else:
                             p_err += 1
                             click.echo(f"      x {msg}")
-            _db.update_playlist_last_check(conn, pl["apple_id"])
+            _db.update_playlist_last_check(conn, pl["apple_id"], last_modified=remote_lm)
         click.echo(f"\n  [Playlists] Done — {p_new} new, {p_dl} downloaded, {p_err} errors.")
     else:
         click.echo("\n  [Playlists] No playlists followed — skipping.")
@@ -367,10 +393,11 @@ def playlist_list(ctx):
     if not playlists:
         click.echo("  No playlists followed. Use: ammon playlist follow <id>")
         return
-    click.echo(f"\n  {'Apple ID':<40} Name")
-    click.echo("  " + "-" * 70)
+    click.echo(f"\n  {'Apple ID':<40} {'Last Modified':<22} Name")
+    click.echo("  " + "-" * 85)
     for p in playlists:
-        click.echo(f"  {p['apple_id']:<40} {p['name'] or '?'}")
+        lm = (p['last_modified'] or 'unknown')[:19].replace('T', ' ')
+        click.echo(f"  {p['apple_id']:<40} {lm:<22} {p['name'] or '?'}")
     click.echo()
 
 
@@ -402,6 +429,16 @@ def playlist_refresh(ctx, download, playlist):
     total_new = total_dl = total_err = 0
 
     for pl in playlists:
+        # Check if playlist was modified since last check
+        info = _api.get_playlist_info(apple_api, pl["apple_id"])
+        remote_lm = info.get("last_modified") if info else None
+        stored_lm = pl.get("last_modified")
+
+        if remote_lm and stored_lm and remote_lm == stored_lm:
+            click.echo(f"  Skipping: {pl['name']} — not modified since {remote_lm[:10]}")
+            total_new += 0
+            continue
+
         click.echo(f"  Checking: {pl['name']} ({pl['apple_id']})...")
         tracks = _api.get_playlist_tracks(apple_api, pl["apple_id"])
         new = dl = err = 0
@@ -421,7 +458,7 @@ def playlist_refresh(ctx, download, playlist):
                     else:
                         err += 1
                         click.echo(f"      x {msg}")
-        _db.update_playlist_last_check(conn, pl["apple_id"])
+        _db.update_playlist_last_check(conn, pl["apple_id"], last_modified=remote_lm)
         click.echo(f"    {new} new, {dl} downloaded, {err} errors")
         total_new += new; total_dl += dl; total_err += err
 
@@ -432,8 +469,9 @@ def playlist_refresh(ctx, download, playlist):
 @playlist.command(name="extract-artists")
 @click.argument("playlist_id", metavar="ID_OR_URL")
 @click.option("--follow", "-f", is_flag=True, help="Add artists to ammon follow list and sync to odesli")
+@click.option("--output", "-o", default=None, metavar="FILE", help="Export artists to CSV or TXT file (e.g. artists.csv)")
 @click.pass_context
-def playlist_extract_artists(ctx, playlist_id, follow):
+def playlist_extract_artists(ctx, playlist_id, follow, output):
     """Extract all unique artists from a playlist.
 
     Use --follow to add them to ammon's artist follow list and
@@ -464,6 +502,22 @@ def playlist_extract_artists(ctx, playlist_id, follow):
                 artist_ids[aid] = name_map.get(aid) or t["artist_name"]
 
     click.echo(f"\n  Found {len(artist_ids)} unique artists in playlist\n")
+
+    # Export to file if requested
+    if output:
+        import csv as _csv
+        out_path = Path(output)
+        if out_path.suffix.lower() == ".csv":
+            with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
+                w = _csv.writer(f)
+                w.writerow(["Apple Music ID", "Name"])
+                for aid, name in artist_ids.items():
+                    w.writerow([aid, name])
+        else:
+            with open(out_path, "w", encoding="utf-8") as f:
+                for aid, name in artist_ids.items():
+                    f.write(f"{aid}\t{name}\n")
+        click.echo(f"  Exported {len(artist_ids)} artists to {out_path.resolve()}\n")
 
     # Connect to odesli DB for sync (if available)
     odesli_conn = None
