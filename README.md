@@ -1,5 +1,8 @@
 # AMMON — Apple Music Monitor
 
+> [!WARNING]
+> **This app is for personal, educational, and archival purposes only.** It is not affiliated with Apple Music. Users must ensure their use complies with Apple Music's terms of service and all applicable local copyright laws. Downloaded content is for personal use and may not be shared or redistributed. The developer assumes no responsibility for misuse of this app.
+
 A standalone CLI tool that monitors Apple Music artists and playlists for new releases, downloading them automatically via [OrpheusDL](https://github.com/OrfiDev/orpheusdl).
 
 > Works alongside [odesli-cli](https://github.com/np3ir/odesli-cli) for cross-platform artist tracking.
